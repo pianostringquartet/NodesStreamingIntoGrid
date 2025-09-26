@@ -18,8 +18,15 @@ struct ContentView: View {
     var body: some View {
         HSplitView {
             VStack(spacing: 0) {
-                GraphCanvasView(layoutManager: layoutManager)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                GraphCanvasView(
+                    layoutManager: layoutManager,
+                    selectedNodeId: selectedNodeId,
+                    onNodeSelected: { nodeId in
+                        selectedNodeId = nodeId
+                        logger.log("Node '\(nodeId)' selected via tap", level: .info, category: "UI")
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 ControlPanel(
                     layoutManager: $layoutManager,

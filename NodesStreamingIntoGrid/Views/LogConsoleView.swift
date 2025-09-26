@@ -33,10 +33,12 @@ struct LogConsoleView: View {
                         ForEach(logger.logs) { entry in
                             LogEntryView(entry: entry)
                                 .id(entry.id)
+                                .textSelection(.enabled) // Make logs selectable
                         }
                     }
                     .padding()
                 }
+                .textSelection(.enabled) // Make entire scroll view selectable
                 .onChange(of: logger.logs.count) { _ in
                     if autoScroll, let lastLog = logger.logs.last {
                         withAnimation {

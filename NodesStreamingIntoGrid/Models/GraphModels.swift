@@ -62,7 +62,12 @@ struct GridPosition: Equatable, Hashable, CustomStringConvertible {
     }
 
     var pixelPosition: CGPoint {
-        CGPoint(x: CGFloat(col * 100 + 50), y: CGFloat(row * 100 + 50))
+        let point = CGPoint(x: CGFloat(col * 100 + 50), y: CGFloat(row * 100 + 50))
+        // Only log if this is a potentially problematic node
+        if col == 2 && row == 2 {
+            print("🔍 [Debug] Position calculation for (2,2): \(point)")
+        }
+        return point
     }
 
     static let gridCellSize: CGFloat = 100

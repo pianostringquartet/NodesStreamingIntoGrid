@@ -175,7 +175,9 @@ struct NodeLayer: View {
                 animateChanges: animateChanges
             )
             .onHover { isHovered in
+                let previousId = hoveredNodeId
                 hoveredNodeId = isHovered ? node.id : nil
+                _ = logInView("Hover change: \(previousId ?? "nil") → \(hoveredNodeId ?? "nil") for node \(node.id)")
             }
         }
     }
@@ -187,6 +189,11 @@ struct NodeView: View {
     let showCoordinates: Bool
     let isHovered: Bool
     let animateChanges: Bool
+
+    // Cache the pixel position to prevent recalculation during hover
+    private var cachedPixelPosition: CGPoint {
+        CGPoint(x: CGFloat(node.col * 100 + 50), y: CGFloat(node.row * 100 + 50))
+    }
 
     var body: some View {
         ZStack {
@@ -210,12 +217,21 @@ struct NodeView: View {
                 }
             }
         }
-        .position(node.gridPosition.pixelPosition)
-        .animation(animateChanges ? .spring(response: 0.5, dampingFraction: 0.8) : nil, value: node.gridPosition)
         .scaleEffect(isHovered ? 1.1 : 1.0)
+        .position(cachedPixelPosition)
+        .animation(
+            animateChanges ? .spring(response: 0.5, dampingFraction: 0.8) : nil,
+            value: "\(node.col),\(node.row)"
+        )
         .animation(.easeInOut(duration: 0.2), value: isHovered)
         .onAppear {
             _ = logInView("Node \(node.id) appeared at \(node.gridPosition)")
+        }
+        .onChange(of: node.gridPosition) { oldPos, newPos in
+            _ = logInView("Node \(node.id) position changed: \(oldPos) → \(newPos)")
+        }
+        .onChange(of: isHovered) { wasHovered, nowHovered in
+            _ = logInView("Node \(node.id) hover state: \(wasHovered) → \(nowHovered)")
         }
     }
 }

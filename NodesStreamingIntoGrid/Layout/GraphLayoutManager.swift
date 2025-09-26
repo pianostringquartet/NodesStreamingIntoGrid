@@ -75,6 +75,11 @@ class GraphLayoutManager {
         }
 
         updateTopologicalOrder()
+
+        // Validate the result
+        _ = validateNoOverlaps()
+        _ = validateTopologicalOrder()
+
         logger.log("=== UPSTREAM INSERTION COMPLETE ===", level: .info, category: "Operation")
     }
 
@@ -101,6 +106,11 @@ class GraphLayoutManager {
         }
 
         updateTopologicalOrder()
+
+        // Validate the result
+        _ = validateNoOverlaps()
+        _ = validateTopologicalOrder()
+
         logger.log("=== DOWNSTREAM INSERTION COMPLETE ===", level: .info, category: "Operation")
     }
 
@@ -110,10 +120,23 @@ class GraphLayoutManager {
         logger.log("Strategy: Shift target branch right to make space", level: .info, category: "Strategy")
         shiftBranchRight(startingFrom: targetId)
 
-        let newNode = Node(id: newId, col: idealPosition.col, row: idealPosition.row)
-        addNode(newNode)
-        addEdge(from: newId, to: targetId)
-        logger.log("Placed '\(newId)' after shifting branch", level: .success, category: "Placement")
+        // Re-check if the ideal position is now free after shifting
+        if !isPositionOccupied(idealPosition) {
+            logger.log("Ideal position \(idealPosition) is now FREE after branch shift", level: .success, category: "Conflict")
+            let newNode = Node(id: newId, col: idealPosition.col, row: idealPosition.row)
+            addNode(newNode)
+            addEdge(from: newId, to: targetId)
+            logger.log("Placed '\(newId)' at ideal position after branch shift", level: .success, category: "Placement")
+        } else {
+            logger.log("Ideal position \(idealPosition) is still OCCUPIED after branch shift", level: .warning, category: "Conflict")
+            let alternativePosition = findNearestFreePosition(near: idealPosition, inColumn: idealPosition.col)
+            logger.log("Using alternative position: \(alternativePosition)", level: .info, category: "Conflict")
+
+            let newNode = Node(id: newId, col: alternativePosition.col, row: alternativePosition.row)
+            addNode(newNode)
+            addEdge(from: newId, to: targetId)
+            logger.log("Placed '\(newId)' at alternative position after conflict", level: .success, category: "Placement")
+        }
     }
 
     private func handleDownstreamConflict(newId: String, sourceId: String, idealPosition: GridPosition) {
@@ -266,5 +289,47 @@ class GraphLayoutManager {
         edges.removeAll()
         adjacencyList.removeAll()
         reverseAdjacencyList.removeAll()
+    }
+
+    // MARK: - Validation Methods
+
+    func validateNoOverlaps() -> Bool {
+        let positions = nodes.map { $0.gridPosition }
+        let uniquePositions = Set(positions)
+        let hasOverlaps = positions.count != uniquePositions.count
+
+        if hasOverlaps {
+            logger.log("VALIDATION FAILED: Node position overlaps detected!", level: .error, category: "Validation")
+            let duplicates = Dictionary(grouping: nodes, by: { $0.gridPosition })
+                .filter { $1.count > 1 }
+            for (position, nodes) in duplicates {
+                logger.log("Overlap at \(position): \(nodes.map { $0.id }.joined(separator: ", "))",
+                          level: .error, category: "Validation")
+            }
+        } else {
+            logger.log("Validation passed: No node overlaps", level: .verbose, category: "Validation")
+        }
+
+        return !hasOverlaps
+    }
+
+    func validateTopologicalOrder() -> Bool {
+        for edge in edges {
+            guard let fromNode = findNode(byId: edge.from),
+                  let toNode = findNode(byId: edge.to) else {
+                logger.log("VALIDATION FAILED: Edge references non-existent node: \(edge)",
+                          level: .error, category: "Validation")
+                return false
+            }
+
+            if fromNode.col >= toNode.col {
+                logger.log("VALIDATION FAILED: Edge violates topological order: \(edge.from)@\(fromNode.col) → \(edge.to)@\(toNode.col)",
+                          level: .error, category: "Validation")
+                return false
+            }
+        }
+
+        logger.log("Validation passed: Topological order maintained", level: .verbose, category: "Validation")
+        return true
     }
 }

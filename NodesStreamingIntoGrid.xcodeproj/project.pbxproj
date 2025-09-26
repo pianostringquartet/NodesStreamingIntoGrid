@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		EC2923502E8712C000E158F0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EC2923242E86EDC400E158F0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EC29232B2E86EDC400E158F0;
+			remoteInfo = NodesStreamingIntoGrid;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		EC29232C2E86EDC400E158F0 /* NodesStreamingIntoGrid.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NodesStreamingIntoGrid.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC29234C2E8712C000E158F0 /* NodesStreamingIntoGridTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NodesStreamingIntoGridTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +27,22 @@
 			path = NodesStreamingIntoGrid;
 			sourceTree = "<group>";
 		};
+		EC29234D2E8712C000E158F0 /* NodesStreamingIntoGridTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = NodesStreamingIntoGridTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		EC2923292E86EDC400E158F0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EC2923492E8712C000E158F0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				EC29232E2E86EDC400E158F0 /* NodesStreamingIntoGrid */,
+				EC29234D2E8712C000E158F0 /* NodesStreamingIntoGridTests */,
 				EC29232D2E86EDC400E158F0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				EC29232C2E86EDC400E158F0 /* NodesStreamingIntoGrid.app */,
+				EC29234C2E8712C000E158F0 /* NodesStreamingIntoGridTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,29 @@
 			productReference = EC29232C2E86EDC400E158F0 /* NodesStreamingIntoGrid.app */;
 			productType = "com.apple.product-type.application";
 		};
+		EC29234B2E8712C000E158F0 /* NodesStreamingIntoGridTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC2923522E8712C000E158F0 /* Build configuration list for PBXNativeTarget "NodesStreamingIntoGridTests" */;
+			buildPhases = (
+				EC2923482E8712C000E158F0 /* Sources */,
+				EC2923492E8712C000E158F0 /* Frameworks */,
+				EC29234A2E8712C000E158F0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EC2923512E8712C000E158F0 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				EC29234D2E8712C000E158F0 /* NodesStreamingIntoGridTests */,
+			);
+			name = NodesStreamingIntoGridTests;
+			packageProductDependencies = (
+			);
+			productName = NodesStreamingIntoGridTests;
+			productReference = EC29234C2E8712C000E158F0 /* NodesStreamingIntoGridTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +130,10 @@
 				TargetAttributes = {
 					EC29232B2E86EDC400E158F0 = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					EC29234B2E8712C000E158F0 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = EC29232B2E86EDC400E158F0;
 					};
 				};
 			};
@@ -100,12 +152,20 @@
 			projectRoot = "";
 			targets = (
 				EC29232B2E86EDC400E158F0 /* NodesStreamingIntoGrid */,
+				EC29234B2E8712C000E158F0 /* NodesStreamingIntoGridTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		EC29232A2E86EDC400E158F0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EC29234A2E8712C000E158F0 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +182,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EC2923482E8712C000E158F0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EC2923512E8712C000E158F0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EC29232B2E86EDC400E158F0 /* NodesStreamingIntoGrid */;
+			targetProxy = EC2923502E8712C000E158F0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		EC2923352E86EDC600E158F0 /* Debug */ = {
@@ -274,13 +349,14 @@
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2";
 				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
@@ -318,14 +394,59 @@
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2";
 				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		EC2923532E8712C000E158F0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 57798878NB;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uiExperiments.NodesStreamingIntoGridTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NodesStreamingIntoGrid.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/NodesStreamingIntoGrid";
+			};
+			name = Debug;
+		};
+		EC2923542E8712C000E158F0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 57798878NB;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uiExperiments.NodesStreamingIntoGridTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NodesStreamingIntoGrid.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/NodesStreamingIntoGrid";
 			};
 			name = Release;
 		};
@@ -346,6 +467,15 @@
 			buildConfigurations = (
 				EC2923382E86EDC600E158F0 /* Debug */,
 				EC2923392E86EDC600E158F0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EC2923522E8712C000E158F0 /* Build configuration list for PBXNativeTarget "NodesStreamingIntoGridTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2923532E8712C000E158F0 /* Debug */,
+				EC2923542E8712C000E158F0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

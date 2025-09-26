@@ -22,6 +22,16 @@ class GraphLogger {
     var logs: [LogEntry] = []
     var enableVerbose = true
 
+    // Unified text output for TextEditor
+    var allLogsAsText: String {
+        logs.map { entry in
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm:ss.SSS"
+            let timestamp = timeFormatter.string(from: entry.timestamp)
+            return "\(entry.level.rawValue) [\(timestamp)] [\(entry.category)] \(entry.message)"
+        }.joined(separator: "\n")
+    }
+
     struct LogEntry: Identifiable {
         let id = UUID()
         let timestamp = Date()
@@ -42,8 +52,9 @@ class GraphLogger {
         let entry = LogEntry(level: level, message: message, category: category)
         DispatchQueue.main.async {
             self.logs.append(entry)
-            if self.logs.count > 100 {
-                self.logs.removeFirst()
+            // Keep a reasonable limit to prevent memory issues
+            if self.logs.count > 500 {
+                self.logs.removeFirst(100) // Remove oldest 100 entries
             }
         }
         print(entry.formatted)

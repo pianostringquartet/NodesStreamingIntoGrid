@@ -17,8 +17,9 @@ struct ContentView: View {
 
     var body: some View {
         HSplitView {
-            VStack {
+            VStack(spacing: 0) {
                 GraphCanvasView(layoutManager: layoutManager)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 ControlPanel(
                     layoutManager: $layoutManager,
@@ -28,11 +29,13 @@ struct ContentView: View {
                     logger: $logger
                 )
                 .frame(height: 200)
+                .frame(maxWidth: .infinity)
             }
 
             if showConsole {
                 LogConsoleView()
                     .frame(minWidth: 400, maxWidth: 600)
+                    .frame(maxHeight: .infinity)
             }
         }
         .toolbar {

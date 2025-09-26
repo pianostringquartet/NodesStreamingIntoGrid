@@ -14,7 +14,6 @@ struct GraphCanvasView: View {
     @State private var showGrid = true
     @State private var showCoordinates = true
     @State private var animateChanges = true
-    @State private var hoveredNodeId: String? = nil
 
     let gridSize: CGFloat = 75
     let nodeSize: CGFloat = 50
@@ -36,13 +35,14 @@ struct GraphCanvasView: View {
                         nodes: layoutManager.nodes,
                         nodeSize: nodeSize,
                         showCoordinates: showCoordinates,
-                        hoveredNodeId: $hoveredNodeId,
                         selectedNodeId: selectedNodeId,
                         animateChanges: animateChanges,
                         onNodeSelected: onNodeSelected
                     )
                 }
-                .frame(width: 2000, height: 1000)
+//                .frame(width: 2000, height: 1000)
+                .frame(width: 2000, height: 800)
+                .offset(y: -200)
 //                .frame(width: 2000)
             }
             
@@ -168,7 +168,6 @@ struct NodeLayer: View {
     let nodes: [Node]
     let nodeSize: CGFloat
     let showCoordinates: Bool
-    @Binding var hoveredNodeId: String?
     let selectedNodeId: String
     let animateChanges: Bool
     let onNodeSelected: (String) -> Void
@@ -179,16 +178,10 @@ struct NodeLayer: View {
                 node: node,
                 size: nodeSize,
                 showCoordinates: showCoordinates,
-                isHovered: hoveredNodeId == node.id,
                 isSelected: selectedNodeId == node.id,
                 animateChanges: animateChanges,
                 onTap: { onNodeSelected(node.id) }
             )
-            .onHover { isHovered in
-                let previousId = hoveredNodeId
-                hoveredNodeId = isHovered ? node.id : nil
-                _ = logInView("Hover change: \(previousId ?? "nil") → \(hoveredNodeId ?? "nil") for node \(node.id)")
-            }
         }
     }
 }
@@ -197,25 +190,18 @@ struct NodeView: View {
     let node: Node
     let size: CGFloat
     let showCoordinates: Bool
-    let isHovered: Bool
     let isSelected: Bool
     let animateChanges: Bool
     let onTap: () -> Void
 
-    // Cache the pixel position to prevent recalculation during hover
+    // Cache the pixel position to prevent recalculation
     private var cachedPixelPosition: CGPoint {
         CGPoint(x: CGFloat(Double(node.col * 75) + 37.5), y: CGFloat(Double(node.row * 75) + 37.5))
     }
 
     // Visual state computed properties
     private var nodeColor: Color {
-        if isSelected {
-            return Color.green
-        } else if isHovered {
-            return Color.orange
-        } else {
-            return Color.blue
-        }
+        isSelected ? Color.green : Color.blue
     }
 
     private var strokeColor: Color {
@@ -248,7 +234,6 @@ struct NodeView: View {
                 }
             }
         }
-        .scaleEffect(isHovered ? 1.1 : 1.0)
         .position(cachedPixelPosition)
         .onTapGesture {
             onTap()
@@ -258,16 +243,12 @@ struct NodeView: View {
             animateChanges ? .spring(response: 0.5, dampingFraction: 0.8) : nil,
             value: "\(node.col),\(node.row)"
         )
-        .animation(.easeInOut(duration: 0.2), value: isHovered)
         .animation(.easeInOut(duration: 0.2), value: isSelected)
         .onAppear {
             _ = logInView("Node \(node.id) appeared at \(node.gridPosition)")
         }
         .onChange(of: node.gridPosition) { oldPos, newPos in
             _ = logInView("Node \(node.id) position changed: \(oldPos) → \(newPos)")
-        }
-        .onChange(of: isHovered) { wasHovered, nowHovered in
-            _ = logInView("Node \(node.id) hover state: \(wasHovered) → \(nowHovered)")
         }
     }
 }

@@ -16,6 +16,9 @@ class GraphLayoutManager {
     private var reverseAdjacencyList: [String: Set<String>] = [:]
     private let logger = GraphLogger.shared
 
+    // Position tracking dictionary - single source of truth for cell occupancy
+    private var positionMap: [GridPosition: String] = [:]
+
     private var occupiedPositions: Set<GridPosition> {
         Set(nodes.map { $0.gridPosition })
     }
@@ -39,6 +42,15 @@ class GraphLayoutManager {
 
     func addNode(_ node: Node) {
         logger.logNodeOperation("Adding", node: node.id, details: "at \(node.gridPosition)")
+
+        // Critical: Reserve position BEFORE adding to nodes array
+        if !reservePosition(for: node.id, at: node.gridPosition) {
+            logger.log("CRITICAL ERROR: Cannot add node '\(node.id)' - position \(node.gridPosition) is occupied!",
+                      level: .error, category: "Position")
+            assertionFailure("Attempted to add node to occupied position")
+            return
+        }
+
         nodes.append(node)
         adjacencyList[node.id] = Set()
         reverseAdjacencyList[node.id] = Set()
@@ -64,7 +76,7 @@ class GraphLayoutManager {
         let idealPosition = GridPosition(col: targetNode.col - 1, row: targetNode.row)
         logger.log("Ideal position for '\(newId)': \(idealPosition)", level: .info, category: "Placement")
 
-        if !isPositionOccupied(idealPosition) {
+        if !isPositionOccupiedInMap(idealPosition) {
             logger.log("Ideal position is FREE - placing directly", level: .success, category: "Placement")
             let newNode = Node(id: newId, col: idealPosition.col, row: idealPosition.row)
             addNode(newNode)
@@ -95,7 +107,7 @@ class GraphLayoutManager {
         let idealPosition = GridPosition(col: sourceNode.col + 1, row: sourceNode.row)
         logger.log("Ideal position for '\(newId)': \(idealPosition)", level: .info, category: "Placement")
 
-        if !isPositionOccupied(idealPosition) {
+        if !isPositionOccupiedInMap(idealPosition) {
             logger.log("Ideal position is FREE - placing directly", level: .success, category: "Placement")
             let newNode = Node(id: newId, col: idealPosition.col, row: idealPosition.row)
             addNode(newNode)
@@ -121,7 +133,7 @@ class GraphLayoutManager {
         shiftBranchRight(startingFrom: targetId)
 
         // Re-check if the ideal position is now free after shifting
-        if !isPositionOccupied(idealPosition) {
+        if !isPositionOccupiedInMap(idealPosition) {
             logger.log("Ideal position \(idealPosition) is now FREE after branch shift", level: .success, category: "Conflict")
             let newNode = Node(id: newId, col: idealPosition.col, row: idealPosition.row)
             addNode(newNode)
@@ -129,7 +141,7 @@ class GraphLayoutManager {
             logger.log("Placed '\(newId)' at ideal position after branch shift", level: .success, category: "Placement")
         } else {
             logger.log("Ideal position \(idealPosition) is still OCCUPIED after branch shift", level: .warning, category: "Conflict")
-            let alternativePosition = findNearestFreePosition(near: idealPosition, inColumn: idealPosition.col)
+            let alternativePosition = findNearestFreePositionInMap(near: idealPosition, inColumn: idealPosition.col)
             logger.log("Using alternative position: \(alternativePosition)", level: .info, category: "Conflict")
 
             let newNode = Node(id: newId, col: alternativePosition.col, row: alternativePosition.row)
@@ -149,6 +161,33 @@ class GraphLayoutManager {
         addNode(newNode)
         addEdge(from: sourceId, to: newId)
         logger.log("Placed '\(newId)' at alternative position", level: .success, category: "Placement")
+    }
+
+    private func findNearestFreePositionInMap(near target: GridPosition, inColumn col: Int) -> GridPosition {
+        logger.log("Searching for free position near \(target) in column \(col) using position map", level: .verbose, category: "Search")
+
+        for offset in 0...10 {
+            if offset == 0 && !isPositionOccupiedInMap(target) {
+                logger.log("Target position \(target) is free", level: .success, category: "Search")
+                return target
+            }
+
+            let above = GridPosition(col: col, row: target.row - offset)
+            if offset > 0 && !isPositionOccupiedInMap(above) {
+                logger.log("Found free position \(offset) row(s) above: \(above)", level: .success, category: "Search")
+                return above
+            }
+
+            let below = GridPosition(col: col, row: target.row + offset)
+            if offset > 0 && !isPositionOccupiedInMap(below) {
+                logger.log("Found free position \(offset) row(s) below: \(below)", level: .success, category: "Search")
+                return below
+            }
+        }
+
+        let fallback = GridPosition(col: col, row: target.row + 11)
+        logger.log("Using fallback position far below: \(fallback)", level: .warning, category: "Search")
+        return fallback
     }
 
     private func findNearestFreePosition(near target: GridPosition, inColumn col: Int) -> GridPosition {
@@ -198,11 +237,33 @@ class GraphLayoutManager {
         logger.log("Branch contains \(nodesToShift.count) node(s): \(nodesToShift.joined(separator: ", "))",
                   level: .info, category: "Shift")
 
-        for nodeId in nodesToShift {
+        // Sort nodes by column position (rightmost first) to avoid internal conflicts
+        let sortedNodesToShift = nodesToShift.sorted { nodeId1, nodeId2 in
+            guard let node1 = nodes.first(where: { $0.id == nodeId1 }),
+                  let node2 = nodes.first(where: { $0.id == nodeId2 }) else {
+                return false
+            }
+            return node1.col > node2.col  // Rightmost nodes first
+        }
+
+        logger.log("Moving nodes in order (rightmost first): \(sortedNodesToShift.joined(separator: ", "))",
+                  level: .info, category: "Shift")
+
+        for nodeId in sortedNodesToShift {
             if let index = nodes.firstIndex(where: { $0.id == nodeId }) {
                 let oldPos = nodes[index].gridPosition
+                let newPos = GridPosition(col: oldPos.col + 1, row: oldPos.row)
+
+                // CRITICAL: Update position map atomically
+                if !moveNodeInPositionMap(nodeId: nodeId, from: oldPos, to: newPos) {
+                    logger.log("CRITICAL: Failed to move '\(nodeId)' in position map from \(oldPos) to \(newPos)",
+                              level: .error, category: "Shift")
+                    assertionFailure("Position map update failed during branch shift")
+                    continue
+                }
+
+                // Update the actual node position
                 nodes[index].col += 1
-                let newPos = nodes[index].gridPosition
                 logger.logShift(nodeId, from: oldPos, to: newPos)
             }
         }
@@ -262,6 +323,20 @@ class GraphLayoutManager {
                 if oldCol != layer {
                     logger.log("Adjusting '\(nodeId)' column from \(oldCol) to \(layer)",
                              level: .verbose, category: "Layers")
+
+                    // CRITICAL: Update position map when changing node positions
+                    let oldPosition = nodes[index].gridPosition
+                    let newPosition = GridPosition(col: layer, row: nodes[index].row)
+
+                    if !moveNodeInPositionMap(nodeId: nodeId, from: oldPosition, to: newPosition) {
+                        logger.log("CRITICAL: Failed to update position map for '\(nodeId)' during layer assignment",
+                                  level: .error, category: "Layers")
+                        logger.log("Skipping layer adjustment for '\(nodeId)' to maintain position map consistency",
+                                  level: .warning, category: "Layers")
+                        continue
+                    }
+
+                    // Update the actual node position only after position map update succeeds
                     nodes[index].col = layer
                 }
             }
@@ -289,16 +364,106 @@ class GraphLayoutManager {
         edges.removeAll()
         adjacencyList.removeAll()
         reverseAdjacencyList.removeAll()
+        positionMap.removeAll() // Clear position tracking
+        logger.log("Position map cleared", level: .verbose, category: "Position")
+    }
+
+    // MARK: - Position Management Methods
+
+    private func reservePosition(for nodeId: String, at position: GridPosition) -> Bool {
+        logger.log("Attempting to reserve position \(position) for node '\(nodeId)'",
+                  level: .verbose, category: "Position")
+
+        if let occupyingNodeId = positionMap[position] {
+            logger.log("CONFLICT: Position \(position) already occupied by '\(occupyingNodeId)'",
+                      level: .warning, category: "Position")
+            return false
+        }
+
+        positionMap[position] = nodeId
+        logger.log("Successfully reserved position \(position) for node '\(nodeId)'",
+                  level: .verbose, category: "Position")
+        dumpPositionMapIfVerbose()
+        return true
+    }
+
+    private func releasePosition(at position: GridPosition) {
+        if let nodeId = positionMap[position] {
+            logger.log("Releasing position \(position) (was occupied by '\(nodeId)')",
+                      level: .verbose, category: "Position")
+            positionMap.removeValue(forKey: position)
+        } else {
+            logger.log("Warning: Attempted to release empty position \(position)",
+                      level: .warning, category: "Position")
+        }
+        dumpPositionMapIfVerbose()
+    }
+
+    private func moveNodeInPositionMap(nodeId: String, from oldPosition: GridPosition, to newPosition: GridPosition) -> Bool {
+        logger.log("Moving '\(nodeId)' in position map: \(oldPosition) → \(newPosition)",
+                  level: .verbose, category: "Position")
+
+        // Check if new position is available
+        if let occupyingNodeId = positionMap[newPosition] {
+            if occupyingNodeId != nodeId {
+                logger.log("MOVE BLOCKED: Position \(newPosition) occupied by '\(occupyingNodeId)'",
+                          level: .error, category: "Position")
+                return false
+            }
+        }
+
+        // Release old position
+        if positionMap[oldPosition] == nodeId {
+            positionMap.removeValue(forKey: oldPosition)
+        }
+
+        // Reserve new position
+        positionMap[newPosition] = nodeId
+        logger.log("Successfully moved '\(nodeId)' to \(newPosition)",
+                  level: .verbose, category: "Position")
+        dumpPositionMapIfVerbose()
+        return true
+    }
+
+    private func isPositionOccupiedInMap(_ position: GridPosition) -> Bool {
+        let occupied = positionMap[position] != nil
+        logger.log("Position \(position): \(occupied ? "OCCUPIED" : "FREE")",
+                  level: .verbose, category: "Position")
+        return occupied
+    }
+
+    private func dumpPositionMapIfVerbose() {
+        if logger.enableVerbose {
+            dumpPositionMap()
+        }
+    }
+
+    private func dumpPositionMap() {
+        logger.log("=== POSITION MAP DUMP ===", level: .info, category: "Position")
+        if positionMap.isEmpty {
+            logger.log("Position map is empty", level: .info, category: "Position")
+        } else {
+            let sortedPositions = positionMap.keys.sorted {
+                if $0.col != $1.col { return $0.col < $1.col }
+                return $0.row < $1.row
+            }
+            for position in sortedPositions {
+                logger.log("\(position): '\(positionMap[position]!)'",
+                          level: .info, category: "Position")
+            }
+        }
+        logger.log("=== END POSITION MAP ===", level: .info, category: "Position")
     }
 
     // MARK: - Validation Methods
 
     func validateNoOverlaps() -> Bool {
+        // Check nodes array for overlaps
         let positions = nodes.map { $0.gridPosition }
         let uniquePositions = Set(positions)
-        let hasOverlaps = positions.count != uniquePositions.count
+        let hasNodeOverlaps = positions.count != uniquePositions.count
 
-        if hasOverlaps {
+        if hasNodeOverlaps {
             logger.log("VALIDATION FAILED: Node position overlaps detected!", level: .error, category: "Validation")
             let duplicates = Dictionary(grouping: nodes, by: { $0.gridPosition })
                 .filter { $1.count > 1 }
@@ -306,11 +471,78 @@ class GraphLayoutManager {
                 logger.log("Overlap at \(position): \(nodes.map { $0.id }.joined(separator: ", "))",
                           level: .error, category: "Validation")
             }
-        } else {
-            logger.log("Validation passed: No node overlaps", level: .verbose, category: "Validation")
         }
 
-        return !hasOverlaps
+        // Validate position map consistency
+        let mapConsistencyValid = validatePositionMapConsistency()
+
+        let overallValid = !hasNodeOverlaps && mapConsistencyValid
+
+        if overallValid {
+            logger.log("Validation passed: No overlaps", level: .verbose, category: "Validation")
+        }
+
+        return overallValid
+    }
+
+    private func validatePositionMapConsistency() -> Bool {
+        var isValid = true
+
+        // Check that every node is in the position map
+        for node in nodes {
+            if let mappedNodeId = positionMap[node.gridPosition] {
+                if mappedNodeId != node.id {
+                    logger.log("POSITION MAP ERROR: Position \(node.gridPosition) maps to '\(mappedNodeId)' but node '\(node.id)' claims it",
+                              level: .error, category: "Validation")
+                    isValid = false
+                }
+            } else {
+                logger.log("POSITION MAP ERROR: Node '\(node.id)' at \(node.gridPosition) not found in position map",
+                          level: .error, category: "Validation")
+                isValid = false
+            }
+        }
+
+        // Check that every position map entry corresponds to an actual node
+        for (position, nodeId) in positionMap {
+            if let node = nodes.first(where: { $0.id == nodeId }) {
+                if node.gridPosition != position {
+                    logger.log("POSITION MAP ERROR: Position map shows '\(nodeId)' at \(position) but node is actually at \(node.gridPosition)",
+                              level: .error, category: "Validation")
+                    isValid = false
+                }
+            } else {
+                logger.log("POSITION MAP ERROR: Position map shows '\(nodeId)' at \(position) but no such node exists",
+                          level: .error, category: "Validation")
+                isValid = false
+            }
+        }
+
+        if isValid {
+            logger.log("Position map consistency validated", level: .verbose, category: "Validation")
+        } else {
+            logger.log("POSITION MAP VALIDATION FAILED", level: .error, category: "Validation")
+            dumpPositionMap()
+        }
+
+        return isValid
+    }
+
+    private func repairPositionMap() {
+        logger.log("Attempting to repair position map", level: .warning, category: "Validation")
+        positionMap.removeAll()
+
+        for node in nodes {
+            if positionMap[node.gridPosition] != nil {
+                logger.log("REPAIR ERROR: Multiple nodes at \(node.gridPosition) - cannot auto-repair",
+                          level: .error, category: "Validation")
+                continue
+            }
+            positionMap[node.gridPosition] = node.id
+        }
+
+        logger.log("Position map repair attempted", level: .warning, category: "Validation")
+        dumpPositionMap()
     }
 
     func validateTopologicalOrder() -> Bool {

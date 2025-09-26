@@ -42,9 +42,10 @@ struct GraphCanvasView: View {
                 }
 //                .frame(width: 2000, height: 1000)
                 .frame(width: 2000, height: 800)
-                .offset(y: -200)
+                
 //                .frame(width: 2000)
             }
+            .offset(y: 200)
             
 
 //            VStack {
@@ -227,7 +228,7 @@ struct NodeView: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.white)
 
-                if showCoordinates || isHovered {
+                if showCoordinates {
                     Text("(\(node.col),\(node.row))")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.8))

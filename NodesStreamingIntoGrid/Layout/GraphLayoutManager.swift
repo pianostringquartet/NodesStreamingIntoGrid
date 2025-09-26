@@ -132,23 +132,35 @@ class GraphLayoutManager {
         logger.log("Strategy: Shift target branch right to make space", level: .info, category: "Strategy")
         shiftBranchRight(startingFrom: targetId)
 
-        // Re-check if the ideal position is now free after shifting
-        if !isPositionOccupiedInMap(idealPosition) {
-            logger.log("Ideal position \(idealPosition) is now FREE after branch shift", level: .success, category: "Conflict")
-            let newNode = Node(id: newId, col: idealPosition.col, row: idealPosition.row)
-            addNode(newNode)
-            addEdge(from: newId, to: targetId)
-            logger.log("Placed '\(newId)' at ideal position after branch shift", level: .success, category: "Placement")
-        } else {
-            logger.log("Ideal position \(idealPosition) is still OCCUPIED after branch shift", level: .warning, category: "Conflict")
-            let alternativePosition = findNearestFreePositionInMap(near: idealPosition, inColumn: idealPosition.col)
-            logger.log("Using alternative position: \(alternativePosition)", level: .info, category: "Conflict")
-
-            let newNode = Node(id: newId, col: alternativePosition.col, row: alternativePosition.row)
-            addNode(newNode)
-            addEdge(from: newId, to: targetId)
-            logger.log("Placed '\(newId)' at alternative position after conflict", level: .success, category: "Placement")
+        // Recalculate ideal position based on target's new location for better proximity
+        guard let targetNode = findNode(byId: targetId) else {
+            logger.log("ERROR: Target node '\(targetId)' not found after branch shift", level: .error, category: "Conflict")
+            return
         }
+
+        let proximityIdealPosition = GridPosition(col: targetNode.col - 1, row: targetNode.row)
+        logger.log("Recalculated proximity-focused ideal position: \(proximityIdealPosition) (target is now at \(targetNode.gridPosition))",
+                  level: .info, category: "Proximity")
+
+        // Try proximity-focused position first
+        if !isPositionOccupiedInMap(proximityIdealPosition) {
+            logger.log("Proximity ideal position \(proximityIdealPosition) is FREE", level: .success, category: "Proximity")
+            let newNode = Node(id: newId, col: proximityIdealPosition.col, row: proximityIdealPosition.row)
+            addNode(newNode)
+            addEdge(from: newId, to: targetId)
+            logger.log("Placed '\(newId)' at proximity ideal position for visual continuity", level: .success, category: "Placement")
+            return
+        }
+
+        // If proximity position is occupied, search near it for better visual results
+        logger.log("Proximity ideal position \(proximityIdealPosition) is OCCUPIED - searching nearby", level: .warning, category: "Proximity")
+        let alternativePosition = findNearestFreePositionInMap(near: proximityIdealPosition, inColumn: proximityIdealPosition.col)
+        logger.log("Using proximity-focused alternative position: \(alternativePosition)", level: .info, category: "Proximity")
+
+        let newNode = Node(id: newId, col: alternativePosition.col, row: alternativePosition.row)
+        addNode(newNode)
+        addEdge(from: newId, to: targetId)
+        logger.log("Placed '\(newId)' at proximity-focused alternative position", level: .success, category: "Placement")
     }
 
     private func handleDownstreamConflict(newId: String, sourceId: String, idealPosition: GridPosition) {

@@ -22,6 +22,9 @@ class GraphLayoutManager {
     // Spatial constraint tracking - ensures downstream nodes stay east of upstream nodes
     private var spatialConstraints: [String: SpatialConstraint] = [:]
 
+    // Feature flag for new intent-based placement system
+    private let useIntentBasedPlacement = true
+
     private struct SpatialConstraint {
         let minLayer: Int?      // Minimum layer this node can be assigned to
         let maxLayer: Int?      // Maximum layer this node can be assigned to
@@ -36,12 +39,670 @@ class GraphLayoutManager {
         }
     }
 
+    // MARK: - New Intent-Based Placement System
+
+    enum PlacementType {
+        case adjacentDownstream
+        case adjacentUpstream
+        case disconnected
+    }
+
+    enum PlacementPriority {
+        case userIntent     // High - preserve user's spatial expectations
+        case topological    // Medium - satisfy dependency requirements
+        case optimization   // Low - nice-to-have layout improvements
+    }
+
+    struct PlacementIntent {
+        let type: PlacementType
+        let anchor: String?         // Reference node that should stay stable
+        let newNode: String         // Node being placed
+        let priority: PlacementPriority
+        let reason: String          // For logging and debugging
+
+        static func downstreamOf(_ anchor: String, placing newNode: String) -> PlacementIntent {
+            PlacementIntent(
+                type: .adjacentDownstream,
+                anchor: anchor,
+                newNode: newNode,
+                priority: .userIntent,
+                reason: "User requested '\(newNode)' downstream of '\(anchor)'"
+            )
+        }
+
+        static func upstreamOf(_ anchor: String, placing newNode: String) -> PlacementIntent {
+            PlacementIntent(
+                type: .adjacentUpstream,
+                anchor: anchor,
+                newNode: newNode,
+                priority: .userIntent,
+                reason: "User requested '\(newNode)' upstream of '\(anchor)'"
+            )
+        }
+
+        static func disconnected(_ newNode: String) -> PlacementIntent {
+            PlacementIntent(
+                type: .disconnected,
+                anchor: nil,
+                newNode: newNode,
+                priority: .userIntent,
+                reason: "User requested disconnected node '\(newNode)'"
+            )
+        }
+    }
+
+    struct TopologicalConstraint {
+        let before: String      // Node that must come before
+        let after: String       // Node that must come after
+        let reason: String      // Why this constraint exists
+    }
+
+    struct ProximityConstraint {
+        let node: String        // Node being constrained
+        let preferredPosition: GridPosition  // Ideal position
+        let tolerance: Int      // How far away is acceptable
+        let reason: String      // Why this constraint exists
+    }
+
+    struct NodeLock {
+        let nodeId: String      // Node that shouldn't move
+        let reason: String      // Why it's locked
+    }
+
+    struct PlacementConstraints {
+        let hard: [TopologicalConstraint]    // Must be satisfied
+        let soft: [ProximityConstraint]      // Should be satisfied when possible
+        let locks: [NodeLock]                // Nodes that shouldn't move
+    }
+
     private var occupiedPositions: Set<GridPosition> {
         Set(nodes.map { $0.gridPosition })
     }
 
+    // MARK: - Constraint Generation
+
+    private func generateConstraints(for intent: PlacementIntent) -> PlacementConstraints {
+        logger.log("Generating constraints for intent: \(intent.reason)", level: .info, category: "Intent")
+
+        var hardConstraints: [TopologicalConstraint] = []
+        var softConstraints: [ProximityConstraint] = []
+        var locks: [NodeLock] = []
+
+        // Lock the anchor node to prevent unexpected movement
+        if let anchor = intent.anchor {
+            locks.append(NodeLock(
+                nodeId: anchor,
+                reason: "Anchor node for \(intent.type) placement"
+            ))
+        }
+
+        switch intent.type {
+        case .adjacentDownstream:
+            guard let anchor = intent.anchor,
+                  let anchorNode = findNode(byId: anchor) else {
+                logger.log("ERROR: Cannot find anchor node for downstream placement", level: .error, category: "Intent")
+                break
+            }
+
+            // Hard constraint: new node must be east of anchor
+            hardConstraints.append(TopologicalConstraint(
+                before: anchor,
+                after: intent.newNode,
+                reason: "Downstream topology requirement"
+            ))
+
+            // Soft constraint: prefer immediate adjacency
+            let preferredPos = GridPosition(col: anchorNode.col + 1, row: anchorNode.row)
+            softConstraints.append(ProximityConstraint(
+                node: intent.newNode,
+                preferredPosition: preferredPos,
+                tolerance: 1,
+                reason: "User expects adjacent downstream placement"
+            ))
+
+        case .adjacentUpstream:
+            guard let anchor = intent.anchor,
+                  let anchorNode = findNode(byId: anchor) else {
+                logger.log("ERROR: Cannot find anchor node for upstream placement", level: .error, category: "Intent")
+                break
+            }
+
+            // Hard constraint: new node must be west of anchor
+            hardConstraints.append(TopologicalConstraint(
+                before: intent.newNode,
+                after: anchor,
+                reason: "Upstream topology requirement"
+            ))
+
+            // Soft constraint: prefer immediate adjacency
+            let preferredPos = GridPosition(col: anchorNode.col - 1, row: anchorNode.row)
+            softConstraints.append(ProximityConstraint(
+                node: intent.newNode,
+                preferredPosition: preferredPos,
+                tolerance: 1,
+                reason: "User expects adjacent upstream placement"
+            ))
+
+        case .disconnected:
+            // No hard topological constraints for disconnected nodes
+            // Just find a good empty position
+            break
+        }
+
+        logger.log("Generated \(hardConstraints.count) hard, \(softConstraints.count) soft constraints, \(locks.count) locks",
+                  level: .info, category: "Intent")
+
+        return PlacementConstraints(
+            hard: hardConstraints,
+            soft: softConstraints,
+            locks: locks
+        )
+    }
+
+    // MARK: - Multi-Strategy Placement Solver
+
+    enum PlacementStrategy {
+        case exactPosition          // Try the exact preferred position
+        case adjacentAlternatives   // Try nearby positions in same row
+        case rowAlternatives        // Try same column, different rows
+        case minimalDisplacement    // Move one conflicting node slightly
+        case strategicAnchorShift   // Shift anchor node and branch when beneficial
+        case fallbackSearch         // Search in expanding radius
+    }
+
+    struct PlacementResult {
+        let position: GridPosition
+        let strategy: PlacementStrategy
+        let displacements: [NodeDisplacement]  // Other nodes that need to move
+        let success: Bool
+        let reason: String
+
+        struct NodeDisplacement {
+            let nodeId: String
+            let from: GridPosition
+            let to: GridPosition
+            let reason: String
+        }
+    }
+
+    private func solvePlacement(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        logger.log("Solving placement with multiple strategies", level: .info, category: "Solver")
+
+        // Try strategies in order of preference
+        let strategies: [PlacementStrategy] = [
+            .exactPosition,
+            .adjacentAlternatives,
+            .rowAlternatives,
+            .minimalDisplacement,
+            .strategicAnchorShift,
+            .fallbackSearch
+        ]
+
+        for strategy in strategies {
+            logger.log("Trying placement strategy: \(strategy)", level: .verbose, category: "Solver")
+
+            let result = tryPlacementStrategy(strategy, for: intent, with: constraints)
+            if result.success {
+                logger.log("SUCCESS: Strategy \(strategy) found solution at \(result.position)",
+                          level: .success, category: "Solver")
+                return result
+            } else {
+                logger.log("FAILED: Strategy \(strategy) - \(result.reason)",
+                          level: .verbose, category: "Solver")
+            }
+        }
+
+        // If all strategies fail, return a fallback distant position
+        logger.log("All strategies failed, using distant fallback position", level: .warning, category: "Solver")
+        return PlacementResult(
+            position: findDistantFallbackPosition(),
+            strategy: .fallbackSearch,
+            displacements: [],
+            success: true,
+            reason: "All proximity strategies failed, using distant position"
+        )
+    }
+
+    private func tryPlacementStrategy(_ strategy: PlacementStrategy, for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        switch strategy {
+        case .exactPosition:
+            return tryExactPosition(for: intent, with: constraints)
+        case .adjacentAlternatives:
+            return tryAdjacentAlternatives(for: intent, with: constraints)
+        case .rowAlternatives:
+            return tryRowAlternatives(for: intent, with: constraints)
+        case .minimalDisplacement:
+            return tryMinimalDisplacement(for: intent, with: constraints)
+        case .strategicAnchorShift:
+            return tryStrategicAnchorShift(for: intent, with: constraints)
+        case .fallbackSearch:
+            return tryFallbackSearch(for: intent, with: constraints)
+        }
+    }
+
+    private func tryExactPosition(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        guard let preferredConstraint = constraints.soft.first(where: { $0.node == intent.newNode }) else {
+            return PlacementResult(position: GridPosition(col: 0, row: 0), strategy: .exactPosition, displacements: [], success: false, reason: "No preferred position constraint")
+        }
+
+        let preferredPos = preferredConstraint.preferredPosition
+
+        if !isPositionOccupiedInMap(preferredPos) {
+            return PlacementResult(
+                position: preferredPos,
+                strategy: .exactPosition,
+                displacements: [],
+                success: true,
+                reason: "Preferred position is free"
+            )
+        } else {
+            return PlacementResult(
+                position: preferredPos,
+                strategy: .exactPosition,
+                displacements: [],
+                success: false,
+                reason: "Preferred position \(preferredPos) is occupied"
+            )
+        }
+    }
+
+    private func tryAdjacentAlternatives(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        guard let preferredConstraint = constraints.soft.first(where: { $0.node == intent.newNode }) else {
+            return PlacementResult(position: GridPosition(col: 0, row: 0), strategy: .adjacentAlternatives, displacements: [], success: false, reason: "No preferred position constraint")
+        }
+
+        let preferredPos = preferredConstraint.preferredPosition
+
+        // Try positions in the same row, nearby columns
+        for colOffset in 1...3 {
+            for direction in [-1, 1] {  // Try both directions
+                let testPos = GridPosition(col: preferredPos.col + (colOffset * direction), row: preferredPos.row)
+
+                if !isPositionOccupiedInMap(testPos) && satisfiesHardConstraints(testPos, for: intent, with: constraints) {
+                    return PlacementResult(
+                        position: testPos,
+                        strategy: .adjacentAlternatives,
+                        displacements: [],
+                        success: true,
+                        reason: "Found adjacent alternative at \(testPos)"
+                    )
+                }
+            }
+        }
+
+        return PlacementResult(
+            position: preferredPos,
+            strategy: .adjacentAlternatives,
+            displacements: [],
+            success: false,
+            reason: "No adjacent alternatives found"
+        )
+    }
+
+    private func tryRowAlternatives(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        guard let preferredConstraint = constraints.soft.first(where: { $0.node == intent.newNode }) else {
+            return PlacementResult(position: GridPosition(col: 0, row: 0), strategy: .rowAlternatives, displacements: [], success: false, reason: "No preferred position constraint")
+        }
+
+        let preferredPos = preferredConstraint.preferredPosition
+
+        // Try different rows in the same column
+        for rowOffset in 1...3 {
+            for direction in [-1, 1] {  // Try above and below
+                let testPos = GridPosition(col: preferredPos.col, row: preferredPos.row + (rowOffset * direction))
+
+                if !isPositionOccupiedInMap(testPos) && satisfiesHardConstraints(testPos, for: intent, with: constraints) {
+                    return PlacementResult(
+                        position: testPos,
+                        strategy: .rowAlternatives,
+                        displacements: [],
+                        success: true,
+                        reason: "Found row alternative at \(testPos)"
+                    )
+                }
+            }
+        }
+
+        return PlacementResult(
+            position: preferredPos,
+            strategy: .rowAlternatives,
+            displacements: [],
+            success: false,
+            reason: "No row alternatives found"
+        )
+    }
+
+    private func tryMinimalDisplacement(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        // For now, skip minimal displacement - it's complex and we can implement later
+        return PlacementResult(
+            position: GridPosition(col: 0, row: 0),
+            strategy: .minimalDisplacement,
+            displacements: [],
+            success: false,
+            reason: "Minimal displacement not yet implemented"
+        )
+    }
+
+    private func tryStrategicAnchorShift(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        logger.log("Attempting strategic anchor shift", level: .info, category: "Strategy")
+
+        // Only apply to upstream placements where we want to shift the target branch
+        guard intent.type == .adjacentUpstream,
+              let anchor = intent.anchor,
+              let anchorNode = findNode(byId: anchor) else {
+            return PlacementResult(
+                position: GridPosition(col: 0, row: 0),
+                strategy: .strategicAnchorShift,
+                displacements: [],
+                success: false,
+                reason: "Strategic anchor shift only applies to upstream placement"
+            )
+        }
+
+        // Calculate how much we need to shift the anchor branch
+        guard let preferredConstraint = constraints.soft.first(where: { $0.node == intent.newNode }) else {
+            return PlacementResult(
+                position: GridPosition(col: 0, row: 0),
+                strategy: .strategicAnchorShift,
+                displacements: [],
+                success: false,
+                reason: "No preferred position constraint for strategic shift"
+            )
+        }
+
+        let preferredPos = preferredConstraint.preferredPosition
+
+        // Check if the preferred position is occupied
+        guard isPositionOccupiedInMap(preferredPos) else {
+            return PlacementResult(
+                position: GridPosition(col: 0, row: 0),
+                strategy: .strategicAnchorShift,
+                displacements: [],
+                success: false,
+                reason: "Preferred position is not occupied, no shift needed"
+            )
+        }
+
+        // Try shifting the anchor branch 1-2 positions to the right
+        for shiftAmount in 1...2 {
+            logger.log("Trying anchor shift of \(shiftAmount) positions", level: .verbose, category: "Strategy")
+
+            let shiftResult = evaluateAnchorShift(
+                anchor: anchor,
+                shiftAmount: shiftAmount,
+                newNodePosition: preferredPos,
+                intent: intent
+            )
+
+            if shiftResult.success {
+                logger.log("Strategic anchor shift successful: shift by \(shiftAmount)", level: .success, category: "Strategy")
+                return PlacementResult(
+                    position: preferredPos,
+                    strategy: .strategicAnchorShift,
+                    displacements: shiftResult.displacements,
+                    success: true,
+                    reason: "Shifted anchor branch by \(shiftAmount) to create space"
+                )
+            }
+        }
+
+        return PlacementResult(
+            position: GridPosition(col: 0, row: 0),
+            strategy: .strategicAnchorShift,
+            displacements: [],
+            success: false,
+            reason: "No beneficial anchor shift found"
+        )
+    }
+
+    private func evaluateAnchorShift(
+        anchor: String,
+        shiftAmount: Int,
+        newNodePosition: GridPosition,
+        intent: PlacementIntent
+    ) -> (success: Bool, displacements: [PlacementResult.NodeDisplacement]) {
+        logger.log("Evaluating anchor shift: '\(anchor)' by \(shiftAmount) positions", level: .verbose, category: "Strategy")
+
+        // Find all nodes in the anchor's downstream branch
+        let branchNodes = findDownstreamBranch(from: anchor)
+        var displacements: [PlacementResult.NodeDisplacement] = []
+
+        // Check if we can shift all branch nodes
+        for nodeId in branchNodes {
+            guard let node = findNode(byId: nodeId) else { continue }
+
+            let newPosition = GridPosition(col: node.col + shiftAmount, row: node.row)
+
+            // Check if the new position would be occupied (excluding nodes we're planning to move)
+            if isPositionOccupiedInMap(newPosition) {
+                // Check if it's occupied by another node in our branch (which is OK)
+                if let occupyingNodeId = positionMap[newPosition],
+                   !branchNodes.contains(occupyingNodeId) {
+                    logger.log("Shift blocked: \(newPosition) occupied by '\(occupyingNodeId)' (not in branch)",
+                              level: .verbose, category: "Strategy")
+                    return (false, [])
+                }
+            }
+
+            displacements.append(PlacementResult.NodeDisplacement(
+                nodeId: nodeId,
+                from: node.gridPosition,
+                to: newPosition,
+                reason: "Strategic shift to make space for '\(intent.newNode)'"
+            ))
+        }
+
+        // Check if the shift creates a valid solution
+        let wouldCreateValidPlacement = !isPositionOccupiedAfterDisplacements(
+            newNodePosition,
+            displacements: displacements
+        )
+
+        if wouldCreateValidPlacement {
+            logger.log("Anchor shift evaluation: SUCCESS - creates valid placement", level: .success, category: "Strategy")
+            return (true, displacements)
+        } else {
+            logger.log("Anchor shift evaluation: FAILED - would not create valid placement", level: .verbose, category: "Strategy")
+            return (false, [])
+        }
+    }
+
+    private func findDownstreamBranch(from nodeId: String) -> [String] {
+        var visited: Set<String> = []
+        var toVisit: Set<String> = [nodeId]
+        var branch: [String] = []
+
+        while !toVisit.isEmpty {
+            let current = toVisit.removeFirst()
+            if visited.contains(current) { continue }
+            visited.insert(current)
+            branch.append(current)
+
+            // Add all downstream nodes
+            if let children = adjacencyList[current] {
+                toVisit.formUnion(children)
+            }
+        }
+
+        logger.log("Found downstream branch from '\(nodeId)': \(branch.joined(separator: ", "))",
+                  level: .verbose, category: "Strategy")
+        return branch
+    }
+
+    private func isPositionOccupiedAfterDisplacements(
+        _ position: GridPosition,
+        displacements: [PlacementResult.NodeDisplacement]
+    ) -> Bool {
+        // Create a temporary map of positions after displacements
+        var tempPositionMap = positionMap
+
+        // Remove nodes from their old positions
+        for displacement in displacements {
+            tempPositionMap.removeValue(forKey: displacement.from)
+        }
+
+        // Add nodes to their new positions
+        for displacement in displacements {
+            tempPositionMap[displacement.to] = displacement.nodeId
+        }
+
+        // Check if the target position would be occupied
+        return tempPositionMap[position] != nil
+    }
+
+    private func tryFallbackSearch(for intent: PlacementIntent, with constraints: PlacementConstraints) -> PlacementResult {
+        guard let preferredConstraint = constraints.soft.first(where: { $0.node == intent.newNode }) else {
+            return PlacementResult(position: findDistantFallbackPosition(), strategy: .fallbackSearch, displacements: [], success: true, reason: "Using distant fallback")
+        }
+
+        let preferredPos = preferredConstraint.preferredPosition
+
+        // Search in expanding radius from preferred position
+        for radius in 1...10 {
+            for colOffset in -radius...radius {
+                for rowOffset in -radius...radius {
+                    let testPos = GridPosition(col: preferredPos.col + colOffset, row: preferredPos.row + rowOffset)
+
+                    if !isPositionOccupiedInMap(testPos) && satisfiesHardConstraints(testPos, for: intent, with: constraints) {
+                        return PlacementResult(
+                            position: testPos,
+                            strategy: .fallbackSearch,
+                            displacements: [],
+                            success: true,
+                            reason: "Found position in radius \(radius) search"
+                        )
+                    }
+                }
+            }
+        }
+
+        return PlacementResult(
+            position: findDistantFallbackPosition(),
+            strategy: .fallbackSearch,
+            displacements: [],
+            success: true,
+            reason: "Used distant fallback after radius search failed"
+        )
+    }
+
+    private func satisfiesHardConstraints(_ position: GridPosition, for intent: PlacementIntent, with constraints: PlacementConstraints) -> Bool {
+        // Check topological constraints
+        for constraint in constraints.hard {
+            if constraint.after == intent.newNode {
+                // This node must come after the 'before' node
+                guard let beforeNode = findNode(byId: constraint.before) else { continue }
+                if position.col <= beforeNode.col {
+                    return false  // Would violate topological order
+                }
+            }
+            if constraint.before == intent.newNode {
+                // This node must come before the 'after' node
+                guard let afterNode = findNode(byId: constraint.after) else { continue }
+                if position.col >= afterNode.col {
+                    return false  // Would violate topological order
+                }
+            }
+        }
+        return true
+    }
+
+    private func findDistantFallbackPosition() -> GridPosition {
+        // Find a position far from existing nodes as last resort
+        let maxCol = nodes.map { $0.col }.max() ?? -1
+        let maxRow = nodes.map { $0.row }.max() ?? -1
+        return GridPosition(col: maxCol + 2, row: maxRow + 1)
+    }
+
+    // MARK: - New Intent-Based Placement Methods
+
+    private func placeNodeWithIntent(_ intent: PlacementIntent) -> Bool {
+        logger.log("=== INTENT-BASED PLACEMENT START ===", level: .info, category: "Intent")
+        logger.log("Intent: \(intent.reason)", level: .info, category: "Intent")
+
+        // Generate constraints based on user intent
+        let constraints = generateConstraints(for: intent)
+
+        // Solve for optimal placement
+        let solution = solvePlacement(for: intent, with: constraints)
+
+        // Apply the solution
+        let newNode = Node(id: intent.newNode, col: solution.position.col, row: solution.position.row)
+
+        // Reserve position in map
+        if !reservePosition(for: newNode.id, at: newNode.gridPosition) {
+            logger.log("CRITICAL ERROR: Failed to reserve position \(newNode.gridPosition) for intent-based placement",
+                      level: .error, category: "Intent")
+            return false
+        }
+
+        // Add node to graph
+        nodes.append(newNode)
+        adjacencyList[newNode.id] = Set()
+        reverseAdjacencyList[newNode.id] = Set()
+
+        // Add edge if this is a relational placement
+        if let anchor = intent.anchor {
+            switch intent.type {
+            case .adjacentDownstream:
+                addEdge(from: anchor, to: intent.newNode)
+            case .adjacentUpstream:
+                addEdge(from: intent.newNode, to: anchor)
+            case .disconnected:
+                break  // No edge for disconnected nodes
+            }
+        }
+
+        // Apply any displacements if needed (for minimal displacement strategy)
+        for displacement in solution.displacements {
+            logger.log("Applying displacement: \(displacement.nodeId) \(displacement.from) → \(displacement.to)",
+                      level: .info, category: "Intent")
+            // Move the displaced node
+            if let index = nodes.firstIndex(where: { $0.id == displacement.nodeId }) {
+                if !moveNodeInPositionMap(nodeId: displacement.nodeId, from: displacement.from, to: displacement.to) {
+                    logger.log("Failed to move displaced node \(displacement.nodeId)", level: .error, category: "Intent")
+                }
+                nodes[index].col = displacement.to.col
+                nodes[index].row = displacement.to.row
+            }
+        }
+
+        logger.log("SUCCESS: Placed '\(intent.newNode)' at \(solution.position) using \(solution.strategy)",
+                  level: .success, category: "Intent")
+        logger.log("=== INTENT-BASED PLACEMENT COMPLETE ===", level: .info, category: "Intent")
+
+        return true
+    }
+
+    // New public methods that use intent-based placement
+    func addNodeDownstreamWithIntent(newId: String, of sourceId: String) {
+        let intent = PlacementIntent.downstreamOf(sourceId, placing: newId)
+        let success = placeNodeWithIntent(intent)
+
+        if success {
+            // Validate result
+            _ = validateNoOverlaps()
+            _ = validateTopologicalOrder()
+        }
+    }
+
+    func addNodeUpstreamWithIntent(newId: String, of targetId: String) {
+        let intent = PlacementIntent.upstreamOf(targetId, placing: newId)
+        let success = placeNodeWithIntent(intent)
+
+        if success {
+            // Validate result
+            _ = validateNoOverlaps()
+            _ = validateTopologicalOrder()
+        }
+    }
+
     init() {
         logger.log("GraphLayoutManager initialized", level: .info, category: "System")
+        if useIntentBasedPlacement {
+            logger.log("Using new intent-based placement system", level: .info, category: "System")
+        } else {
+            logger.log("Using legacy placement system", level: .info, category: "System")
+        }
     }
 
     func findNode(byId id: String) -> Node? {
@@ -82,7 +743,14 @@ class GraphLayoutManager {
     }
 
     func addNodeUpstream(newId: String, of targetId: String) {
-        logger.log("=== UPSTREAM INSERTION START ===", level: .info, category: "Operation")
+        // Feature flag: use new intent-based system or legacy system
+        if useIntentBasedPlacement {
+            addNodeUpstreamWithIntent(newId: newId, of: targetId)
+            return
+        }
+
+        // Legacy implementation below
+        logger.log("=== UPSTREAM INSERTION START (LEGACY) ===", level: .info, category: "Operation")
         logger.log("Adding '\(newId)' upstream of '\(targetId)'", level: .info, category: "Operation")
 
         guard let targetNode = findNode(byId: targetId) else {
@@ -132,7 +800,14 @@ class GraphLayoutManager {
     }
 
     func addNodeDownstream(newId: String, of sourceId: String) {
-        logger.log("=== DOWNSTREAM INSERTION START ===", level: .info, category: "Operation")
+        // Feature flag: use new intent-based system or legacy system
+        if useIntentBasedPlacement {
+            addNodeDownstreamWithIntent(newId: newId, of: sourceId)
+            return
+        }
+
+        // Legacy implementation below
+        logger.log("=== DOWNSTREAM INSERTION START (LEGACY) ===", level: .info, category: "Operation")
         logger.log("Adding '\(newId)' downstream of '\(sourceId)'", level: .info, category: "Operation")
 
         guard let sourceNode = findNode(byId: sourceId) else {

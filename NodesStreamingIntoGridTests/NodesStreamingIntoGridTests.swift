@@ -110,6 +110,76 @@ final class NodesStreamingIntoGridTests: XCTestCase {
         XCTAssertTrue(layoutManager.validateTopologicalOrder())
     }
 
+    func testDownstreamProximityPreservation() throws {
+        // This tests the specific case: C at (1,2) → N1 should be placed at (2,2) for maximum proximity
+        // Previously, N1 was being placed at (3,2) due to topological optimization, creating unnecessary distance
+
+        let nodeC = Node(id: "C", col: 1, row: 2)
+        layoutManager.addNode(nodeC)
+
+        // Add N1 downstream of C
+        layoutManager.addNodeDownstream(newId: "N1", of: "C")
+
+        XCTAssertEqual(layoutManager.nodes.count, 2)
+
+        let cNode = layoutManager.findNode(byId: "C")!
+        let n1Node = layoutManager.findNode(byId: "N1")!
+
+        // Critical test: N1 should be immediately adjacent to C for best proximity
+        XCTAssertEqual(n1Node.col, cNode.col + 1, "N1 should be in the column immediately east of C")
+        XCTAssertEqual(n1Node.row, cNode.row, "N1 should be in the same row as C")
+        XCTAssertEqual(n1Node.gridPosition, GridPosition(col: 2, row: 2), "N1 should be at exactly (2,2)")
+
+        // Verify the spatial relationship is correct
+        XCTAssertLessThan(cNode.col, n1Node.col, "C should be west of N1 (upstream/downstream relationship)")
+
+        // Verify edge exists
+        XCTAssertTrue(layoutManager.edges.contains { $0.from == "C" && $0.to == "N1" }, "Edge C → N1 should exist")
+
+        // Verify system integrity
+        XCTAssertTrue(layoutManager.validateNoOverlaps(), "No position overlaps should exist")
+        XCTAssertTrue(layoutManager.validateTopologicalOrder(), "Topological order should be maintained")
+
+        print("Proximity test result - C: \(cNode.gridPosition), N1: \(n1Node.gridPosition)")
+    }
+
+    func testDownstreamProximityWithExistingNodes() throws {
+        // Test proximity preservation when other nodes exist in the graph
+        // This ensures the proximity system works in complex scenarios
+
+        // Set up initial graph: A → B, A → C
+        let nodeA = Node(id: "A", col: 0, row: 1)
+        let nodeB = Node(id: "B", col: 1, row: 1)
+        let nodeC = Node(id: "C", col: 1, row: 2)
+
+        layoutManager.addNode(nodeA)
+        layoutManager.addNode(nodeB)
+        layoutManager.addNode(nodeC)
+        layoutManager.addEdge(from: "A", to: "B")
+        layoutManager.addEdge(from: "A", to: "C")
+
+        // Now add N1 downstream of C - should still prefer proximity
+        layoutManager.addNodeDownstream(newId: "N1", of: "C")
+
+        let cNode = layoutManager.findNode(byId: "C")!
+        let n1Node = layoutManager.findNode(byId: "N1")!
+
+        // N1 should still be placed adjacent to C despite other nodes existing
+        XCTAssertEqual(n1Node.col, cNode.col + 1, "N1 should be immediately adjacent to C even with other nodes present")
+        XCTAssertEqual(n1Node.row, cNode.row, "N1 should be in the same row as C")
+
+        // Verify system integrity with more complex graph
+        XCTAssertTrue(layoutManager.validateNoOverlaps(), "No overlaps in complex graph")
+        XCTAssertTrue(layoutManager.validateTopologicalOrder(), "Topological order maintained in complex graph")
+
+        // Verify all expected edges exist
+        XCTAssertTrue(layoutManager.edges.contains { $0.from == "A" && $0.to == "B" })
+        XCTAssertTrue(layoutManager.edges.contains { $0.from == "A" && $0.to == "C" })
+        XCTAssertTrue(layoutManager.edges.contains { $0.from == "C" && $0.to == "N1" })
+
+        print("Complex proximity test - C: \(cNode.gridPosition), N1: \(n1Node.gridPosition)")
+    }
+
     // MARK: - Regression Tests
 
     func testSpecificBugCase_MultipleUpstreamToSameTarget() throws {

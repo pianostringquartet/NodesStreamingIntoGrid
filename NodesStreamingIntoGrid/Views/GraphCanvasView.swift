@@ -45,7 +45,7 @@ struct GraphCanvasView: View {
                 
 //                .frame(width: 2000)
             }
-            .offset(y: 200)
+//            .offset(y: 200)
             
 
 //            VStack {

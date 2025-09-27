@@ -19,6 +19,23 @@ class GraphLayoutManager {
     // Position tracking dictionary - single source of truth for cell occupancy
     private var positionMap: [GridPosition: String] = [:]
 
+    // Spatial constraint tracking - ensures downstream nodes stay east of upstream nodes
+    private var spatialConstraints: [String: SpatialConstraint] = [:]
+
+    private struct SpatialConstraint {
+        let minLayer: Int?      // Minimum layer this node can be assigned to
+        let maxLayer: Int?      // Maximum layer this node can be assigned to
+        let preferredLayer: Int? // Ideal layer for proximity (prefer this when valid)
+        let reason: String      // Why this constraint exists (for logging)
+
+        init(minLayer: Int? = nil, maxLayer: Int? = nil, preferredLayer: Int? = nil, reason: String) {
+            self.minLayer = minLayer
+            self.maxLayer = maxLayer
+            self.preferredLayer = preferredLayer
+            self.reason = reason
+        }
+    }
+
     private var occupiedPositions: Set<GridPosition> {
         Set(nodes.map { $0.gridPosition })
     }
@@ -88,6 +105,25 @@ class GraphLayoutManager {
 
         updateTopologicalOrder()
 
+        // Record spatial constraint AFTER topological ordering when positions are stable
+        guard let targetNode = findNode(byId: targetId) else {
+            logger.log("ERROR: Target node '\(targetId)' not found for constraint recording", level: .error, category: "Constraint")
+            return
+        }
+
+        let maxLayer = targetNode.col - 1
+        let preferredLayer = targetNode.col - 1  // Prefer immediate adjacency for proximity
+        spatialConstraints[newId] = SpatialConstraint(
+            maxLayer: maxLayer,
+            preferredLayer: preferredLayer,
+            reason: "upstream of '\(targetId)' at final layer \(targetNode.col)"
+        )
+        logger.log("Recorded spatial constraint: '\(newId)' must be at layer <= \(maxLayer) (upstream of '\(targetId)' at final position)",
+                  level: .info, category: "Constraint")
+
+        // Re-run topological ordering to apply the new constraint
+        updateTopologicalOrder()
+
         // Validate the result
         _ = validateNoOverlaps()
         _ = validateTopologicalOrder()
@@ -117,6 +153,25 @@ class GraphLayoutManager {
             handleDownstreamConflict(newId: newId, sourceId: sourceId, idealPosition: idealPosition)
         }
 
+        updateTopologicalOrder()
+
+        // Record spatial constraint AFTER topological ordering when positions are stable
+        guard let sourceNode = findNode(byId: sourceId) else {
+            logger.log("ERROR: Source node '\(sourceId)' not found for constraint recording", level: .error, category: "Constraint")
+            return
+        }
+
+        let minLayer = sourceNode.col + 1
+        let preferredLayer = sourceNode.col + 1  // Prefer immediate adjacency for proximity
+        spatialConstraints[newId] = SpatialConstraint(
+            minLayer: minLayer,
+            preferredLayer: preferredLayer,
+            reason: "downstream of '\(sourceId)' at final layer \(sourceNode.col)"
+        )
+        logger.log("Recorded spatial constraint: '\(newId)' must be at layer >= \(minLayer) (downstream of '\(sourceId)' at final position)",
+                  level: .info, category: "Constraint")
+
+        // Re-run topological ordering to apply the new constraint
         updateTopologicalOrder()
 
         // Validate the result
@@ -321,12 +376,74 @@ class GraphLayoutManager {
 
         for nodeId in order {
             let predecessors = reverseAdjacencyList[nodeId] ?? []
+            let topologicalLayer: Int
             if predecessors.isEmpty {
-                layerMap[nodeId] = 0
+                topologicalLayer = 0
             } else {
                 let maxPredLayer = predecessors.compactMap { layerMap[$0] }.max() ?? -1
-                layerMap[nodeId] = maxPredLayer + 1
+                topologicalLayer = maxPredLayer + 1
             }
+
+            // Apply spatial constraints with proximity preference
+            var finalLayer = topologicalLayer
+            if let constraint = spatialConstraints[nodeId] {
+                logger.log("Applying spatial constraint to '\(nodeId)': \(constraint.reason)",
+                          level: .info, category: "Constraint")
+
+                // First, try to use preferred layer if it's valid
+                if let preferredLayer = constraint.preferredLayer {
+                    var canUsePreferred = true
+
+                    // Check if preferred layer violates minimum constraint
+                    if let minLayer = constraint.minLayer, preferredLayer < minLayer {
+                        canUsePreferred = false
+                    }
+
+                    // Check if preferred layer violates maximum constraint
+                    if let maxLayer = constraint.maxLayer, preferredLayer > maxLayer {
+                        canUsePreferred = false
+                    }
+
+                    // Check if preferred layer satisfies topological dependencies
+                    if preferredLayer < topologicalLayer {
+                        logger.log("Preferred layer \(preferredLayer) would violate topological order (needs >= \(topologicalLayer))",
+                                  level: .warning, category: "Constraint")
+                        canUsePreferred = false
+                    }
+
+                    if canUsePreferred {
+                        logger.log("Using preferred layer \(preferredLayer) for proximity to adjacent node",
+                                  level: .success, category: "Proximity")
+                        finalLayer = preferredLayer
+                    } else {
+                        logger.log("Cannot use preferred layer \(preferredLayer), falling back to constraint enforcement",
+                                  level: .warning, category: "Proximity")
+                    }
+                }
+
+                // If preferred layer couldn't be used, enforce hard constraints
+                if finalLayer == topologicalLayer {
+                    // Enforce minimum layer (for downstream nodes)
+                    if let minLayer = constraint.minLayer {
+                        if finalLayer < minLayer {
+                            logger.log("Enforcing min layer: '\(nodeId)' moved from \(finalLayer) to \(minLayer)",
+                                      level: .info, category: "Constraint")
+                            finalLayer = minLayer
+                        }
+                    }
+
+                    // Enforce maximum layer (for upstream nodes)
+                    if let maxLayer = constraint.maxLayer {
+                        if finalLayer > maxLayer {
+                            logger.log("Enforcing max layer: '\(nodeId)' moved from \(finalLayer) to \(maxLayer)",
+                                      level: .info, category: "Constraint")
+                            finalLayer = maxLayer
+                        }
+                    }
+                }
+            }
+
+            layerMap[nodeId] = finalLayer
         }
 
         for (nodeId, layer) in layerMap {
@@ -377,7 +494,8 @@ class GraphLayoutManager {
         adjacencyList.removeAll()
         reverseAdjacencyList.removeAll()
         positionMap.removeAll() // Clear position tracking
-        logger.log("Position map cleared", level: .verbose, category: "Position")
+        spatialConstraints.removeAll() // Clear spatial constraints
+        logger.log("Position map and spatial constraints cleared", level: .verbose, category: "Position")
     }
 
     // MARK: - Position Management Methods
